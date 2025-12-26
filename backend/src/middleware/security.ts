@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
+import validator from 'validator';
 
 // Helmet configuration for security headers
 export const helmetConfig = helmet({
@@ -47,15 +48,13 @@ export const requestSizeLimit = (req: Request, res: Response, next: NextFunction
   next();
 };
 
-// Sanitize user input (basic XSS protection)
+// FIXED: Improved sanitization without ReDoS vulnerabilities
 export const sanitizeInput = (req: Request, res: Response, next: NextFunction) => {
   if (req.body) {
     Object.keys(req.body).forEach(key => {
       if (typeof req.body[key] === 'string') {
-        // Remove potentially dangerous characters
-        req.body[key] = req.body[key]
-          .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-          .trim();
+        // Use validator.js for safe sanitization
+        req.body[key] = validator.escape(req.body[key]).trim();
       }
     });
   }
