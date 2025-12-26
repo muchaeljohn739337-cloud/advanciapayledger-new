@@ -1,0 +1,156 @@
+// ============================================
+// AI DIAGRAM MODELS - Add to schema.prisma
+// ============================================
+
+model AIDiagram {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  prompt      String   // Original user prompt
+  diagramType DiagramType @default(FLOWCHART)
+  
+  // Diagram content
+  mermaidCode String   @db.Text // Mermaid.js syntax
+  svgContent  String?  @db.Text // Generated SVG (cached)
+  
+  // Metadata
+  createdById String
+  createdBy   users    @relation("DiagramCreator", fields: [createdById], references: [id])
+  
+  // Sharing & Collaboration
+  isPublic    Boolean  @default(false)
+  boardId     String?  // Optional: Link to sticky notes board
+  board       StickyNoteBoard? @relation(fields: [boardId], references: [id], onDelete: SetNull)
+  
+  // Versioning
+  version     Int      @default(1)
+  parentId    String?  // For version history
+  parent      AIDiagram? @relation("DiagramVersions", fields: [parentId], references: [id], onDelete: SetNull)
+  versions    AIDiagram[] @relation("DiagramVersions")
+  
+  // Timestamps
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relations
+  members     DiagramMember[]
+  comments    DiagramComment[]
+  exports     DiagramExport[]
+  
+  @@index([createdById])
+  @@index([boardId])
+  @@index([isPublic])
+  @@index([createdAt])
+  @@map("ai_diagrams")
+}
+
+model DiagramMember {
+  id        String           @id @default(cuid())
+  diagramId String
+  userId    String
+  role      DiagramRole      @default(VIEWER)
+  
+  diagram   AIDiagram        @relation(fields: [diagramId], references: [id], onDelete: Cascade)
+  user      users            @relation("DiagramMembers", fields: [userId], references: [id], onDelete: Cascade)
+  
+  joinedAt  DateTime         @default(now())
+  
+  @@unique([diagramId, userId])
+  @@index([userId])
+  @@map("diagram_members")
+}
+
+model DiagramComment {
+  id        String    @id @default(cuid())
+  diagramId String
+  userId    String
+  content   String
+  
+  // Position on diagram (optional)
+  positionX Float?
+  positionY Float?
+  
+  diagram   AIDiagram @relation(fields: [diagramId], references: [id], onDelete: Cascade)
+  user      users     @relation("DiagramComments", fields: [userId], references: [id], onDelete: Cascade)
+  
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  
+  @@index([diagramId])
+  @@index([userId])
+  @@map("diagram_comments")
+}
+
+model DiagramExport {
+  id         String       @id @default(cuid())
+  diagramId  String
+  userId     String
+  format     ExportFormat
+  fileUrl    String       // URL to exported file
+  fileSize   Int          // Size in bytes
+  
+  diagram    AIDiagram    @relation(fields: [diagramId], references: [id], onDelete: Cascade)
+  user       users        @relation("DiagramExports", fields: [userId], references: [id], onDelete: Cascade)
+  
+  createdAt  DateTime     @default(now())
+  
+  @@index([diagramId])
+  @@index([userId])
+  @@map("diagram_exports")
+}
+
+enum DiagramType {
+  FLOWCHART
+  SEQUENCE
+  CLASS
+  STATE
+  ER_DIAGRAM
+  GANTT
+  PIE_CHART
+  USER_JOURNEY
+  GIT_GRAPH
+  MINDMAP
+  TIMELINE
+  QUADRANT
+}
+
+enum DiagramRole {
+  OWNER
+  EDITOR
+  VIEWER
+}
+
+enum ExportFormat {
+  PNG
+  SVG
+  PDF
+  MERMAID
+  JSON
+}
+
+// ============================================
+// UPDATE USERS MODEL - Add these relations
+// ============================================
+/*
+model users {
+  // ... existing fields ...
+  
+  // AI Diagram relations
+  createdDiagrams   AIDiagram[]       @relation("DiagramCreator")
+  diagramMemberships DiagramMember[]  @relation("DiagramMembers")
+  diagramComments    DiagramComment[] @relation("DiagramComments")
+  diagramExports     DiagramExport[]  @relation("DiagramExports")
+}
+*/
+
+// ============================================
+// UPDATE StickyNoteBoard MODEL (optional)
+// ============================================
+/*
+model StickyNoteBoard {
+  // ... existing fields ...
+  
+  // Linked diagrams
+  diagrams  AIDiagram[]
+}
+*/

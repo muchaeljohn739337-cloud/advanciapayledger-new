@@ -1,0 +1,96 @@
+version: '3.8'
+
+services:
+  # PostgreSQL - Production Database
+  postgres-prod:
+    image: postgres:15-alpine
+    container_name: advancia-postgres-prod
+    environment:
+      POSTGRES_DB: advancia_payledger_prod
+      POSTGRES_USER: advancia_admin
+      POSTGRES_PASSWORD: \
+    ports:
+      - '5433:5432'
+    volumes:
+      - postgres_prod_data:/var/lib/postgresql/data
+      - ./scripts/init-prod-db.sql:/docker-entrypoint-initdb.d/init.sql
+    restart: unless-stopped
+    networks:
+      - advancia-prod-network
+    command: >
+      postgres 
+      -c shared_preload_libraries=pg_stat_statements 
+      -c pg_stat_statements.track=all 
+      -c max_connections=200
+      -c shared_buffers=256MB
+      -c effective_cache_size=1GB
+      -c work_mem=4MB
+
+  # Redis - Production Cache & Session Store  
+  redis-prod:
+    image: redis:7-alpine
+    container_name: advancia-redis-prod
+    environment:
+      REDIS_PASSWORD: \
+    ports:
+      - '6380:6379'
+    volumes:
+      - redis_prod_data:/data
+      - ./scripts/redis-prod.conf:/usr/local/etc/redis/redis.conf
+    restart: unless-stopped
+    networks:
+      - advancia-prod-network
+    command: redis-server /usr/local/etc/redis/redis.conf --requirepass \
+
+  # MongoDB - Production Analytics & Logging
+  mongodb-prod:
+    image: mongo:7
+    container_name: advancia-mongodb-prod
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: advancia_admin
+      MONGO_INITDB_ROOT_PASSWORD: \
+      MONGO_INITDB_DATABASE: advancia_ledger_prod
+    ports:
+      - '27018:27017'
+    volumes:
+      - mongodb_prod_data:/data/db
+      - ./scripts/mongo-init-prod.js:/docker-entrypoint-initdb.d/mongo-init.js
+    restart: unless-stopped
+    networks:
+      - advancia-prod-network
+
+  # Nginx - Reverse Proxy & SSL Termination
+  nginx-prod:
+    image: nginx:alpine
+    container_name: advancia-nginx-prod
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./nginx/prod.conf:/etc/nginx/nginx.conf
+      - ./ssl:/etc/nginx/ssl
+      - nginx_logs:/var/log/nginx
+    restart: unless-stopped
+    networks:
+      - advancia-prod-network
+    depends_on:
+      - postgres-prod
+      - redis-prod
+      - mongodb-prod
+
+volumes:
+  postgres_prod_data:
+    driver: local
+  redis_prod_data:
+    driver: local
+  mongodb_prod_data:
+    driver: local
+  nginx_logs:
+    driver: local
+
+networks:
+  advancia-prod-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
