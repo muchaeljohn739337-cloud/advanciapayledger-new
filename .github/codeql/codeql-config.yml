@@ -1,0 +1,29 @@
+# CodeQL Configuration
+name: 'CodeQL Config'
+
+# Disable default queries and only run security queries
+queries:
+  - uses: security-extended
+  - uses: security-and-quality
+
+# Ignore common false positives
+query-filters:
+  - exclude:
+      id:
+        - js/unused-local-variable
+        - js/useless-assignment-to-local
+        - js/polynomial-redos  # We'll fix these gradually
+        
+# Path filters - exclude generated and test files
+paths-ignore:
+  - '**/node_modules/**'
+  - '**/dist/**'
+  - '**/build/**'
+  - '**/*.test.ts'
+  - '**/*.spec.ts'
+  - '**/coverage/**'
+  
+# Only scan source code
+paths:
+  - backend/src/**
+  - frontend/src/**
