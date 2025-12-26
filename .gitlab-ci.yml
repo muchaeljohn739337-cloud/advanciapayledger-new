@@ -1,0 +1,27 @@
+stages:
+  - security
+  - test
+
+# Secret Detection (GitLab Free)
+secret_detection:
+  stage: security
+  allow_failure: false
+
+# SAST Scanning
+sast:
+  stage: security
+  allow_failure: false
+
+# Dependency Scanning
+dependency_scanning:
+  stage: security
+  allow_failure: false
+
+# Include GitLab security templates
+include:
+  - template: Security/Secret-Detection.gitlab-ci.yml
+  - template: Security/SAST.gitlab-ci.yml
+  - template: Security/Dependency-Scanning.gitlab-ci.yml
+
+variables:
+  SECURE_LOG_LEVEL: "info"
