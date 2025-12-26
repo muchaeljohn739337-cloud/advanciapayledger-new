@@ -35,5 +35,9 @@
     "hardhat:accounts": "hardhat accounts",
     "hardhat:compile": "hardhat compile",
     "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "express-rate-limit": "^8.2.1",
+    "helmet": "^8.1.0"
   }
 }

@@ -1,144 +1,90 @@
-import { NextFunction, Request, Response } from "express";
-import { canBypassRateLimit, getAdminContext } from "../utils/adminBypass";
+import { Request, Response, NextFunction } from 'express';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 
-// Simple in-memory rate limiter
-// In production, use Redis or a dedicated rate limiting service
-const requestCounts = new Map<string, { count: number; resetTime: number }>();
+// Helmet configuration for security headers
+export const helmetConfig = helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'"],
+      imgSrc: ["'self'", 'data:', 'https:'],
+    },
+  },
+  hsts: {
+    maxAge: 31536000,
+    includeSubDomains: true,
+    preload: true,
+  },
+});
 
-interface RateLimitOptions {
-  windowMs: number; // Time window in milliseconds
-  maxRequests: number; // Maximum number of requests per window
-  message?: string; // Custom error message
-}
+// Rate limiting configuration
+export const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per windowMs
+  message: 'Too many requests from this IP, please try again later.',
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
-/**
- * Rate limiting middleware
- * Limits the number of requests from a single IP address
- */
-export function rateLimit(options: RateLimitOptions) {
-  const { windowMs, maxRequests, message } = options;
+// Stricter rate limiting for authentication endpoints
+export const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // Limit each IP to 5 login requests per windowMs
+  message: 'Too many login attempts, please try again later.',
+  skipSuccessfulRequests: true,
+});
 
-  return (req: Request, res: Response, next: NextFunction) => {
-    const identifier = req.ip || req.socket.remoteAddress || "unknown";
-    const now = Date.now();
+// Request size limits
+export const requestSizeLimit = (req: Request, res: Response, next: NextFunction) => {
+  const contentLength = req.headers['content-length'];
+  const maxSize = 10 * 1024 * 1024; // 10MB
 
-    // Get or create request count for this identifier
-    let record = requestCounts.get(identifier);
+  if (contentLength && parseInt(contentLength) > maxSize) {
+    return res.status(413).json({ error: 'Request entity too large' });
+  }
+  next();
+};
 
-    if (!record || now > record.resetTime) {
-      // Create new record or reset expired one
-      record = {
-        count: 1,
-        resetTime: now + windowMs,
-      };
-      requestCounts.set(identifier, record);
-      return next();
-    }
-
-    // Increment count
-    record.count++;
-
-    // Check if limit exceeded
-    if (record.count > maxRequests) {
-      const retryAfter = Math.ceil((record.resetTime - now) / 1000);
-      res.setHeader("Retry-After", retryAfter);
-      res.setHeader("X-RateLimit-Limit", maxRequests);
-      res.setHeader("X-RateLimit-Remaining", 0);
-      res.setHeader(
-        "X-RateLimit-Reset",
-        new Date(record.resetTime).toISOString()
-      );
-
-      return res.status(429).json({
-        error: message || "Too many requests, please try again later.",
-        retryAfter: `${retryAfter} seconds`,
-      });
-    }
-
-    // Set rate limit headers
-    res.setHeader("X-RateLimit-Limit", maxRequests);
-    res.setHeader("X-RateLimit-Remaining", maxRequests - record.count);
-    res.setHeader(
-      "X-RateLimit-Reset",
-      new Date(record.resetTime).toISOString()
-    );
-
-    next();
-  };
-}
-
-/**
- * Clean up expired entries periodically
- */
-setInterval(() => {
-  const now = Date.now();
-  const keysToDelete: string[] = [];
-
-  requestCounts.forEach((record, key) => {
-    if (now > record.resetTime) {
-      keysToDelete.push(key);
-    }
-  });
-
-  keysToDelete.forEach((key) => requestCounts.delete(key));
-}, 60000); // Clean up every minute
-
-/**
- * Input validation middleware
- * Sanitizes and validates request inputs
- */
-export function validateInput(req: Request, res: Response, next: NextFunction) {
-  // Remove null bytes from inputs
-  const sanitize = (obj: any): any => {
-    if (typeof obj === "string") {
-      return obj.replace(/\0/g, "");
-    }
-    if (typeof obj === "object" && obj !== null) {
-      for (const key in obj) {
-        obj[key] = sanitize(obj[key]);
-      }
-    }
-    return obj;
-  };
-
+// Sanitize user input (basic XSS protection)
+export const sanitizeInput = (req: Request, res: Response, next: NextFunction) => {
   if (req.body) {
-    req.body = sanitize(req.body);
+    Object.keys(req.body).forEach(key => {
+      if (typeof req.body[key] === 'string') {
+        // Remove potentially dangerous characters
+        req.body[key] = req.body[key]
+          .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+          .trim();
+      }
+    });
   }
-  if (req.query) {
-    req.query = sanitize(req.query);
-  }
-  if (req.params) {
-    req.params = sanitize(req.params);
-  }
-
   next();
-}
+};
 
-/**
- * Security headers middleware
- */
-export function securityHeaders(
-  req: Request,
-  res: Response,
-  next: NextFunction
-) {
-  // Prevent clickjacking
-  res.setHeader("X-Frame-Options", "DENY");
+// Production-ready CORS configuration
+export const getCorsOptions = () => {
+  const allowedOrigins = process.env.ALLOWED_ORIGINS 
+    ? process.env.ALLOWED_ORIGINS.split(',')
+    : [
+        'http://localhost:3000',
+        'http://localhost:3001',
+        process.env.FRONTEND_URL || 'http://localhost:3000'
+      ];
 
-  // Prevent MIME type sniffing
-  res.setHeader("X-Content-Type-Options", "nosniff");
-
-  // Enable XSS protection
-  res.setHeader("X-XSS-Protection", "1; mode=block");
-
-  // Referrer policy
-  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
-
-  // HTTP Strict Transport Security (force HTTPS)\n  res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload");\n  \n  // Remove X-Powered-By header\n  res.removeHeader("X-Powered-By");\n  \n  // Content Security Policy
-  res.setHeader(
-    "Content-Security-Policy",
-    "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline';"
-  );
-
-  next();
-}
+  return {
+    origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+      // Allow requests with no origin (mobile apps, Postman, etc.)
+      if (!origin) return callback(null, true);
+      
+      if (allowedOrigins.indexOf(origin) !== -1) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  };
+};
